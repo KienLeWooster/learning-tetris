@@ -41,6 +41,7 @@ from random import randrange as rand
 import time
 import random
 import pygame, sys
+import csv
 
 # The configuration
 cell_size = 18
@@ -276,8 +277,27 @@ class TetrisApp(object):
 
     def quit(self):
         self.center_msg("Exiting...")
-        pygame.display.update()
+
+
+        file = open('data.csv', 'w', newline='')
+
+        with file:
+            # identifying header
+            header = ['state', 'action', 'q_value']
+            writer = csv.DictWriter(file, fieldnames=header)
+
+            # writing data row-wise into the csv file
+            writer.writeheader()
+            for key in self.ai.q_function_val:
+                state = key[0]
+                action = key[1]
+                q_value = self.ai.q_function_val[key]
+                writer.writerow({'state': state,
+                                 'action': action,
+                                 'q_value': q_value})
+
         sys.exit()
+
 
     def drop(self, manual):
         if not self.gameover and not self.paused:
@@ -305,7 +325,7 @@ class TetrisApp(object):
                     else:
                         break
                 self.add_cl_lines(cleared_rows)
-                self.ai.state = (ai_board, ai_stone, self.score)
+                self.ai.state = (ai_board, ai_stone, self.lines)
                 return True
         return False
 
@@ -369,6 +389,7 @@ class TetrisApp(object):
 
             a = random.choice(self.ai.get_all_actions())
             current_state = self.ai.state
+
             for key in a:
                 pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
 
@@ -395,7 +416,12 @@ class TetrisApp(object):
                 pprint(action)
                 possible_next_q_values.append(
                     self.ai.q_function_val.get((self.ai.state, action, self.score), 0))
-            self.ai.q_function_val[(self.ai.state, a)] = r + self.ai.discount_factor * max(possible_next_q_values)
+            self.ai.q_function_val[(current_state, a)] = r + self.ai.discount_factor * max(possible_next_q_values)
+
+            # for key in self.ai.q_function_val:
+            #
+            # with open("sample.json", "w") as outfile:
+            #     json.dump(self.ai.q_function_val, outfile, indent = 4)
             dont_burn_my_cpu.tick(maxfps)
 
 
