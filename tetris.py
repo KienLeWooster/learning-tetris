@@ -35,18 +35,21 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+import operator
 
 from pprint import pprint
 from random import randrange as rand
-import time
 import random
-import pygame, sys
+import pygame
+import sys
 import csv
+
+from tetris_ai import TetrisAI
 
 # The configuration
 cell_size = 18
-cols = 10
-rows = 22
+cols = 8
+rows = 16
 maxfps = 30
 
 colors = [
@@ -66,19 +69,13 @@ tetris_shapes = [
     [[1, 1, 1],
      [0, 1, 0]],
 
-    [[0, 2, 2],
-     [2, 2, 0]],
-
-    [[3, 3, 0],
-     [0, 3, 3]],
-
     [[4, 0, 0],
      [4, 4, 4]],
 
     [[0, 0, 5],
      [5, 5, 5]],
 
-    [[6, 6, 6, 6]],
+    [[6, 6, 6]],
 
 ]
 
@@ -122,53 +119,6 @@ def new_board():
     ]
     board += [[1 for x in range(cols)]]
     return board
-
-
-class TetrisAI:
-    def __init__(self):
-        initial_board = tuple(
-            tuple(0 for x in range(cols))
-            for y in range(rows)
-        )
-        current_block = tuple([(1, 1, 1), (0, 1, 0)])
-        lines = 0
-        self.discount_factor = 0.9
-        self.state = (initial_board, current_block, lines)
-        self.action = []
-        # A dictionary where the key is a tuple of the state and action and the
-        #   key is its corresponding q-value
-        self.q_function_val = {}
-
-    def reward(self):
-        return self.state[2]
-
-    def get_all_actions(self):
-        actions = []
-        horizontal_size = len(self.state[1][0])
-        possible_moves_left = 3
-        possible_moves_right = 7 - horizontal_size
-
-        for rotations in range(4):
-            current_action = [
-                pygame.K_UP
-                for _ in range(rotations)]
-            for i in range(possible_moves_left + 1):
-                actions.append(tuple(current_action +
-                               [pygame.K_LEFT
-                                for _ in range(i)]
-                               ))
-            for i in range(possible_moves_right + 1):
-                actions.append(tuple(current_action +
-                               [pygame.K_RIGHT
-                                for _ in range(i)]
-                               ))
-        return actions
-
-    def test(self):
-        # Use q_function_val here
-        # Test by using q_function_val to play the game then look at the score
-        #   gotten
-        pass
 
 
 class TetrisApp(object):
@@ -277,10 +227,7 @@ class TetrisApp(object):
 
     def quit(self):
         self.center_msg("Exiting...")
-
-
         file = open('data.csv', 'w', newline='')
-
         with file:
             # identifying header
             header = ['state', 'action', 'q_value']
@@ -298,7 +245,6 @@ class TetrisApp(object):
 
         sys.exit()
 
-
     def drop(self, manual):
         if not self.gameover and not self.paused:
             self.score += 1 if manual else 0
@@ -311,6 +257,7 @@ class TetrisApp(object):
                     self.stone,
                     (self.stone_x, self.stone_y))
                 ai_board = tuple(map(tuple, self.board))
+                # pprint(ai_board)
                 ai_stone = tuple(map(tuple, self.next_stone))
                 self.new_stone()
 
@@ -325,7 +272,7 @@ class TetrisApp(object):
                     else:
                         break
                 self.add_cl_lines(cleared_rows)
-                self.ai.state = (ai_board, ai_stone, self.lines)
+                self.ai.state = (ai_board, ai_stone)
                 return True
         return False
 
@@ -344,13 +291,11 @@ class TetrisApp(object):
 
     def start_game(self):
         if self.gameover:
+            self.ai.score = 0
             self.init_game()
             self.gameover = False
 
     def train(self):
-        return
-
-    def run(self):
         self.gameover = False
         self.paused = False
 
@@ -400,34 +345,127 @@ class TetrisApp(object):
                 if event.type == pygame.USEREVENT + 1:
                     self.drop(False)
                 elif event.type == pygame.QUIT:
-                    pprint(AI.q_function_val)
+                    # pprint(AI.q_function_val)
                     self.quit()
                 elif event.type == pygame.KEYDOWN:
                     for key in key_actions:
                         if event.key == eval("pygame.K_"
                                              + key):
                             key_actions[key]()
-            r = self.ai.reward()
+
+            r = self.score - self.ai.score
+            self.ai.score = self.score
             new_possible_actions = self.ai.get_all_actions()
             possible_next_q_values = []
 
             for action in new_possible_actions:
-                pprint(self.ai.state)
-                pprint(action)
+                # pprint(self.ai.state)
+                # pprint(action)
                 possible_next_q_values.append(
-                    self.ai.q_function_val.get((self.ai.state, action, self.score), 0))
+                    self.ai.q_function_val.get((self.ai.state, action), 0))
             self.ai.q_function_val[(current_state, a)] = r + self.ai.discount_factor * max(possible_next_q_values)
 
             # for key in self.ai.q_function_val:
             #
             # with open("sample.json", "w") as outfile:
             #     json.dump(self.ai.q_function_val, outfile, indent = 4)
-            dont_burn_my_cpu.tick(maxfps)
+            dont_burn_my_cpu.tick(30)
+
+    def test(self):
+        self.ai.import_q_function_data()
+        self.gameover = False
+        self.paused = False
+
+        key_actions = {
+            'LEFT': lambda: self.move(-1),
+            'RIGHT': lambda: self.move(+1),
+            'DOWN': lambda: self.insta_drop(),
+            'UP': self.rotate_stone,
+            'SPACE': self.start_game
+        }
+
+        dont_burn_my_cpu = pygame.time.Clock()
+
+        while 1:
+            self.screen.fill((0, 0, 0))
+            if self.gameover:
+                self.start_game()
+            else:
+                pygame.draw.line(self.screen,
+                                 (255, 255, 255),
+                                 (self.rlim + 1, 0),
+                                 (self.rlim + 1, self.height - 1))
+                self.disp_msg("Next:", (
+                    self.rlim + cell_size,
+                    2))
+                self.disp_msg("Score: %d\n\nLevel: %d\
+                    \nLines: %d" % (self.score, self.level, self.lines),
+                              (self.rlim + cell_size, cell_size * 5))
+                self.draw_matrix(self.bground_grid, (0, 0))
+                self.draw_matrix(self.board, (0, 0))
+                self.draw_matrix(self.stone,
+                                 (self.stone_x, self.stone_y))
+                self.draw_matrix(self.next_stone,
+                                 (cols + 1, 2))
+            pygame.display.update()
+
+            keys = list(self.ai.q_function_val.keys())
+            # for key in keys:
+                # pprint(key[0][1])
+                # pprint(tuple(map(tuple, self.stone)))
+                # print(key[0][1] == tuple(map(tuple, self.stone)))
+                # print()
+            keys = [key
+                    for key in keys
+                    if key[0][0] == tuple(map(tuple, self.board[:len(self.board) - 1])) and
+                       key[0][1] == tuple(map(tuple, self.stone))
+                    ]
+            # print(keys)
+            # max(self.ai.q_function_val.items(), key=operator.itemgetter(1))[0]
+            current_state = self.ai.state
+
+            # for key in a:
+            #     pygame.event.post(
+            #         pygame.event.Event(pygame.KEYDOWN, key=key))
+            #
+            # pygame.event.post(pygame.event.Event(pygame.KEYDOWN,
+            #                                      key=pygame.K_DOWN))
+
+            for event in pygame.event.get():
+                if event.type == pygame.USEREVENT + 1:
+                    self.drop(False)
+                elif event.type == pygame.QUIT:
+                    self.quit()
+                elif event.type == pygame.KEYDOWN:
+                    for key in key_actions:
+                        if event.key == eval("pygame.K_"
+                                             + key):
+                            key_actions[key]()
+            #
+            # r = self.score - self.ai.score
+            # self.ai.score = self.score
+            # new_possible_actions = self.ai.get_all_actions()
+            # possible_next_q_values = []
+            #
+            # for action in new_possible_actions:
+            #     pprint(self.ai.state)
+            #     pprint(action)
+            #     possible_next_q_values.append(
+            #         self.ai.q_function_val.get((self.ai.state, action), 0))
+            # self.ai.q_function_val[
+            #     (current_state, a)] = r + self.ai.discount_factor * max(
+            #     possible_next_q_values)
+
+            # for key in self.ai.q_function_val:
+            #
+            # with open("sample.json", "w") as outfile:
+            #     json.dump(self.ai.q_function_val, outfile, indent = 4)
+            dont_burn_my_cpu.tick(30)
 
 
 if __name__ == '__main__':
     AI = TetrisAI()
     App = TetrisApp(AI)
 
-    App.run()
-
+    App.train()
+    # App.test()
