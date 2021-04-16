@@ -2,8 +2,8 @@ import pygame
 import csv
 
 cell_size = 18
-cols = 10
-rows = 22
+cols = 8
+rows = 16
 maxfps = 30
 
 colors = [
@@ -43,29 +43,30 @@ tetris_shapes = [
 def new_board():
     board = [
         [0 for x in range(cols)]
-        for y in range(rows)
+        for y in range(2)
     ]
-    board += [[1 for x in range(cols)]]
     return board
 
 
 class TetrisAI:
     def __init__(self):
         initial_board = tuple(map(tuple, new_board()))
+        print(initial_board)
         current_block = tuple([(1, 1, 1), (0, 1, 0)])
         self.score = 0
-        self.discount_factor = 0.9
+        self.discount_factor = 0.3
         self.state = (initial_board, current_block)
         self.action = []
         # A dictionary where the key is a tuple of the state and action and the
         #   key is its corresponding q-value
         self.q_function_val = {}
+        self.epsilon = 1.0
 
     def get_all_actions(self):
         actions = []
         horizontal_size = len(self.state[1][0])
-        possible_moves_left = 2
-        possible_moves_right = 3
+        possible_moves_left = 3
+        possible_moves_right = 4
 
         for rotations in range(4):
             current_action = [
