@@ -37,94 +37,14 @@
 # THE SOFTWARE.
 import operator
 
-from pprint import pprint
+from config import *
 from random import randrange as rand
 import random
 import pygame
 import sys
 import csv
-
 from tetris_ai import TetrisAI
-
-# The configuration
-cell_size = 18
-cols = 8
-rows = 16
-maxfps = 30
-
-colors = [
-    (0, 0, 0),
-    (255, 85, 85),
-    (100, 200, 115),
-    (120, 108, 245),
-    (255, 140, 50),
-    (50, 120, 52),
-    (146, 202, 73),
-    (150, 161, 218),
-    (35, 35, 35)  # Helper color for background grid
-]
-
-# Define the shapes of the single parts
-tetris_shapes = [
-    # [[1, 1, 1],
-    #  [0, 1, 0]],
-    #
-    # [[4, 0, 0],
-    #  [4, 4, 4]],
-    #
-    # [[0, 0, 5],
-    #  [5, 5, 5]],
-    #
-    # [[6, 6, 6]],
-    [[1]],
-    [[1, 1]],
-    [[1, 1],
-     [1, 1]],
-    [[1, 1],
-     [0, 1]]
-
-]
-
-
-def rotate_clockwise(shape):
-    return [
-        [shape[y][x] for y in range(len(shape))]
-        for x in range(len(shape[0]) - 1, -1, -1)
-    ]
-
-
-def check_collision(board, shape, offset):
-    off_x, off_y = offset
-    for cy, row in enumerate(shape):
-        for cx, cell in enumerate(row):
-            try:
-                if cell and board[cy + off_y][cx + off_x]:
-                    return True
-            except IndexError:
-                return True
-    return False
-
-
-def remove_row(board, row):
-    del board[row]
-    return [[0 for i in range(cols)]] + board
-
-
-def join_matrixes(mat1, mat2, mat2_off):
-    off_x, off_y = mat2_off
-    for cy, row in enumerate(mat2):
-        for cx, val in enumerate(row):
-            mat1[cy + off_y - 1][cx + off_x] += val
-    return mat1
-
-
-def new_board():
-    board = [
-        [0 for x in range(cols)]
-        for y in range(rows)
-    ]
-    board += [[1 for x in range(cols)]]
-    return board
+from board_operations import *
 
 
 class TetrisApp(object):
@@ -145,10 +65,8 @@ class TetrisApp(object):
         self.total_lines = 0
 
         self.screen = pygame.display.set_mode((self.width, self.height))
-        pygame.event.set_blocked(pygame.MOUSEMOTION)  # We do not need
-        # mouse movement
-        # events, so we
-        # block them.
+        pygame.event.set_blocked(pygame.MOUSEMOTION)
+        # We do not need mouse movement events, so we block them.
         self.next_stone = tetris_shapes[rand(len(tetris_shapes))]
         self.init_game()
 
@@ -236,13 +154,17 @@ class TetrisApp(object):
 
     def quit(self):
         self.center_msg("Exiting...")
+        pygame.quit()
+        sys.exit()
+
+    def save_data(self):
         file = open('data.csv', 'w', newline='')
         with file:
-            # identifying header
+            # Identifying header
             header = ['state', 'action', 'q_value']
             writer = csv.DictWriter(file, fieldnames=header)
 
-            # writing data row-wise into the csv file
+            # Writing data row-wise into the csv file
             writer.writeheader()
             for key in self.ai.q_function_val:
                 state = key[0]
@@ -252,11 +174,6 @@ class TetrisApp(object):
                                  'action': action,
                                  'q_value': q_value})
 
-        print(self.total_score/self.number_of_games)
-        print(self.total_lines/self.number_of_games)
-
-        sys.exit()
-
     def drop(self, manual):
         if not self.gameover and not self.paused:
             self.score += 1 if manual else 0
@@ -264,7 +181,7 @@ class TetrisApp(object):
             if check_collision(self.board,
                                self.stone,
                                (self.stone_x, self.stone_y)):
-                self.board = join_matrixes(
+                self.board = join_matrices(
                     self.board,
                     self.stone,
                     (self.stone_x, self.stone_y))
@@ -276,7 +193,6 @@ class TetrisApp(object):
                 ai_board = ai_board[: 2]
                 ai_board = tuple(map(tuple, ai_board))
 
-                # pprint(ai_board)
                 ai_stone = tuple(map(tuple, self.next_stone))
                 self.new_stone()
 
@@ -297,7 +213,7 @@ class TetrisApp(object):
 
     def insta_drop(self):
         if not self.gameover and not self.paused:
-            while (not self.drop(True)):
+            while not self.drop(True):
                 pass
 
     def rotate_stone(self):
@@ -310,15 +226,65 @@ class TetrisApp(object):
 
     def start_game(self):
         if self.gameover:
-            self.total_score  += self.score
+            self.total_score += self.score
             self.number_of_games += 1
             self.total_lines += self.lines
             self.ai.score = 0
             if self.ai.epsilon >= 0.05:
-                # print(self.ai.epsilon)
-                self.ai.epsilon -= 1.0/7500
+                self.ai.epsilon -= 1.0 / 7500
             self.init_game()
             self.gameover = False
+
+    def determine_best_local_action(self):
+        # Make locally best move if possible
+
+        # Get the first two non-empty rows of the board
+        keys = list(self.ai.q_function_val.keys())
+        ai_board = self.board
+        ai_board = [line for line in ai_board if any(line)]
+
+        # Insert empty rows if not enough filled rows
+        while len(ai_board) < 2:
+            ai_board.insert(0, [0] * cols)
+        ai_board = ai_board[: 2]
+        ai_board = tuple(map(tuple, ai_board))
+        # Extract the state-action pair that matches the current state
+        keys = [key
+                for key in keys
+                if key[0][0] == ai_board and
+                key[0][1] == tuple(map(tuple, self.stone))
+                ]
+        # Get existing Q-values of the current state
+        if len(keys) != 0:
+            new_dict = {key: self.ai.q_function_val[key] for key in
+                        keys}
+            best_key = max(new_dict.items(),
+                           key=operator.itemgetter(1))[0]
+            a = best_key[1]
+        else:
+            # Make random choice if the state has not been seen
+            a = random.choice(self.ai.get_all_actions())
+
+        return a
+
+    def draw_screen(self):
+        pygame.draw.line(self.screen,
+                         (255, 255, 255),
+                         (self.rlim + 1, 0),
+                         (self.rlim + 1, self.height - 1))
+        self.disp_msg("Next:", (
+            self.rlim + cell_size,
+            2))
+        self.disp_msg("Score: %d\n\nLevel: %d\
+            \nLines: %d" % (self.score, self.level, self.lines),
+                      (self.rlim + cell_size, cell_size * 5))
+        self.draw_matrix(self.bground_grid, (0, 0))
+        self.draw_matrix(self.board, (0, 0))
+        self.draw_matrix(self.stone,
+                         (self.stone_x, self.stone_y))
+        self.draw_matrix(self.next_stone,
+                         (cols + 1, 2))
+        pygame.display.update()
 
     def train(self):
         self.gameover = False
@@ -337,75 +303,32 @@ class TetrisApp(object):
         while 1:
             if self.number_of_games > 10000:
                 self.quit()
-
             self.screen.fill((0, 0, 0))
             if self.gameover:
                 self.start_game()
             else:
-                pygame.draw.line(self.screen,
-                                 (255, 255, 255),
-                                 (self.rlim + 1, 0),
-                                 (self.rlim + 1, self.height - 1))
-                self.disp_msg("Next:", (
-                    self.rlim + cell_size,
-                    2))
-                self.disp_msg("Score: %d\n\nLevel: %d\
-                    \nLines: %d" % (self.score, self.level, self.lines),
-                              (self.rlim + cell_size, cell_size * 5))
-                self.draw_matrix(self.bground_grid, (0, 0))
-                self.draw_matrix(self.board, (0, 0))
-                self.draw_matrix(self.stone,
-                                 (self.stone_x, self.stone_y))
-                self.draw_matrix(self.next_stone,
-                                 (cols + 1, 2))
-            pygame.display.update()
+                self.draw_screen()
 
             p = random.random()
             if p < self.ai.epsilon:
+                # Make random choice
                 a = random.choice(self.ai.get_all_actions())
             else:
-                keys = list(self.ai.q_function_val.keys())
-                # for key in keys:
-                # pprint(key[0][1])
-                # pprint(tuple(map(tuple, self.stone)))
-                # print(key[0][1] == tuple(map(tuple, self.stone)))
-                # print()
-                ai_board = self.board
-                ai_board = [line for line in ai_board if any(line)]
-                while len(ai_board) < 2:
-                    ai_board.insert(0, [0, 0, 0, 0])
-
-                ai_board = ai_board[: 2]
-                ai_board = tuple(map(tuple, ai_board))
-                keys = [key
-                        for key in keys
-                        if key[0][0] == ai_board and
-                        key[0][1] == tuple(map(tuple, self.stone))
-                        ]
-
-                if len(keys) != 0:
-                    new_dict = {key:self.ai.q_function_val[key] for key in keys}
-                    best_key = max(new_dict.items(),
-                                   key=operator.itemgetter(1))[0]
-                    a = best_key[1]
-                    print(new_dict[best_key])
-                else:
-                    a = random.choice(self.ai.get_all_actions())
-
+                a = self.determine_best_local_action()
 
             current_state = self.ai.state
 
+            # Ready the action
             for key in a:
                 pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
-
             pygame.event.post(pygame.event.Event(pygame.KEYDOWN,
-               key=pygame.K_DOWN))
+                                                 key=pygame.K_DOWN))
 
             for event in pygame.event.get():
                 if event.type == pygame.USEREVENT + 1:
                     self.drop(False)
                 elif event.type == pygame.QUIT:
-                    # pprint(AI.q_function_val)
+                    self.save_data()
                     self.quit()
                 elif event.type == pygame.KEYDOWN:
                     for key in key_actions:
@@ -413,22 +336,19 @@ class TetrisApp(object):
                                              + key):
                             key_actions[key]()
 
+            # Get the reward
             r = self.score - self.ai.score
             self.ai.score = self.score
+
+            # Update the Q-values of the current state-action pair
             new_possible_actions = self.ai.get_all_actions()
             possible_next_q_values = []
-
             for action in new_possible_actions:
-                # pprint(self.ai.state)
-                # pprint(action)
                 possible_next_q_values.append(
                     self.ai.q_function_val.get((self.ai.state, action), 0))
-            self.ai.q_function_val[(current_state, a)] = r + self.ai.discount_factor * max(possible_next_q_values)
-
-            # for key in self.ai.q_function_val:
-            #
-            # with open("sample.json", "w") as outfile:
-            #     json.dump(self.ai.q_function_val, outfile, indent = 4)
+            self.ai.q_function_val[
+                (current_state, a)] = r + self.ai.discount_factor * max(
+                possible_next_q_values)
             dont_burn_my_cpu.tick(30)
 
     def test(self):
@@ -453,58 +373,13 @@ class TetrisApp(object):
             if self.gameover:
                 self.start_game()
             else:
-                pygame.draw.line(self.screen,
-                                 (255, 255, 255),
-                                 (self.rlim + 1, 0),
-                                 (self.rlim + 1, self.height - 1))
-                self.disp_msg("Next:", (
-                    self.rlim + cell_size,
-                    2))
-                self.disp_msg("Score: %d\n\nLevel: %d\
-                    \nLines: %d" % (self.score, self.level, self.lines),
-                              (self.rlim + cell_size, cell_size * 5))
-                self.draw_matrix(self.bground_grid, (0, 0))
-                self.draw_matrix(self.board, (0, 0))
-                self.draw_matrix(self.stone,
-                                 (self.stone_x, self.stone_y))
-                self.draw_matrix(self.next_stone,
-                                 (cols + 1, 2))
-            pygame.display.update()
+                self.draw_screen()
 
-            keys = list(self.ai.q_function_val.keys())
-            # for key in keys:
-                # pprint(key[0][1])
-                # pprint(tuple(map(tuple, self.stone)))
-                # print(key[0][1] == tuple(map(tuple, self.stone)))
-                # print()
-            ai_board = self.board
-            ai_board = [line for line in ai_board if any(line)]
-            while len(ai_board) < 2:
-                ai_board.insert(0, [0, 0, 0, 0])
-
-            ai_board = ai_board[: 2]
-            ai_board = tuple(map(tuple, ai_board))
-            keys = [key
-                   for key in keys
-                   if key[0][0] == ai_board and
-                   key[0][1] == tuple(map(tuple, self.stone))
-                   ]
-
-            if len(keys) != 0:
-                new_dict = {key: self.ai.q_function_val[key] for key in keys}
-                best_key = max(new_dict.items(),
-                               key=operator.itemgetter(1))[0]
-                a = best_key[1]
-                # print(new_dict[best_key])
-            else:
-                a = random.choice(self.ai.get_all_actions())
-            # print(keys)
-            # max(self.ai.q_function_val.items(), key=operator.itemgetter(1))[0]
-            # current_state = self.ai.state
+            a = self.determine_best_local_action()
 
             for key in a:
-                 pygame.event.post(
-                     pygame.event.Event(pygame.KEYDOWN, key=key))
+                pygame.event.post(
+                    pygame.event.Event(pygame.KEYDOWN, key=key))
 
             pygame.event.post(pygame.event.Event(pygame.KEYDOWN,
                                                  key=pygame.K_DOWN))
@@ -543,23 +418,8 @@ class TetrisApp(object):
             if self.gameover:
                 self.start_game()
             else:
-                pygame.draw.line(self.screen,
-                                 (255, 255, 255),
-                                 (self.rlim + 1, 0),
-                                 (self.rlim + 1, self.height - 1))
-                self.disp_msg("Next:", (
-                    self.rlim + cell_size,
-                    2))
-                self.disp_msg("Score: %d\n\nLevel: %d\
-                    \nLines: %d" % (self.score, self.level, self.lines),
-                              (self.rlim + cell_size, cell_size * 5))
-                self.draw_matrix(self.bground_grid, (0, 0))
-                self.draw_matrix(self.board, (0, 0))
-                self.draw_matrix(self.stone,
-                                 (self.stone_x, self.stone_y))
-                self.draw_matrix(self.next_stone,
-                                 (cols + 1, 2))
-            pygame.display.update()
+                self.draw_screen()
+
             a = random.choice(self.ai.get_all_actions())
             for key in a:
                 pygame.event.post(
@@ -589,4 +449,3 @@ if __name__ == '__main__':
     # App.train()
     # App.random_test()
     App.test()
-
