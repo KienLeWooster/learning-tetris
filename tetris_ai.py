@@ -21,6 +21,7 @@ class TetrisAI:
         self.epsilon = 1.0
 
     def get_all_actions(self):
+        # Get all 32 possible actions
         actions = []
 
         # Hardcoded values for simplicity

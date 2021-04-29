@@ -58,11 +58,22 @@ class TetrisApp(object):
         self.bground_grid = [[8 if x % 2 == y % 2 else 0 for x in range(cols)]
                              for y in range(rows)]
 
+        self.key_actions = {
+            'LEFT': lambda: self.move(-1),
+            'RIGHT': lambda: self.move(+1),
+            'DOWN': lambda: self.insta_drop(),
+            'UP': self.rotate_stone,
+            'SPACE': self.start_game
+        }
+        self.gameover = False
+        self.paused = False
+
         self.default_font = pygame.font.Font(
             pygame.font.get_default_font(), 12)
         self.total_score = 0
         self.number_of_games = 0
         self.total_lines = 0
+        self.dont_burn_my_cpu = pygame.time.Clock()
 
         self.screen = pygame.display.set_mode((self.width, self.height))
         pygame.event.set_blocked(pygame.MOUSEMOTION)
@@ -158,6 +169,7 @@ class TetrisApp(object):
         sys.exit()
 
     def save_data(self):
+        # Save the calculated Q-values into data.csv
         file = open('data.csv', 'w', newline='')
         with file:
             # Identifying header
@@ -236,7 +248,7 @@ class TetrisApp(object):
             self.gameover = False
 
     def determine_best_local_action(self):
-        # Make locally best move if possible
+        # Choose locally best move if possible, else get a random move
 
         # Get the first two non-empty rows of the board
         keys = list(self.ai.q_function_val.keys())
@@ -248,12 +260,14 @@ class TetrisApp(object):
             ai_board.insert(0, [0] * cols)
         ai_board = ai_board[: 2]
         ai_board = tuple(map(tuple, ai_board))
+
         # Extract the state-action pair that matches the current state
         keys = [key
                 for key in keys
                 if key[0][0] == ai_board and
                 key[0][1] == tuple(map(tuple, self.stone))
                 ]
+
         # Get existing Q-values of the current state
         if len(keys) != 0:
             new_dict = {key: self.ai.q_function_val[key] for key in
@@ -286,20 +300,29 @@ class TetrisApp(object):
                          (cols + 1, 2))
         pygame.display.update()
 
+    def convert_action_to_events(self, a):
+        # Convert the agent's action into Pygame events
+        for key in a:
+            pygame.event.post(
+                pygame.event.Event(pygame.KEYDOWN, key=key))
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN,
+                                             key=pygame.K_DOWN))
+
+    def handle_event(self):
+        for event in pygame.event.get():
+            if event.type == pygame.USEREVENT + 1:
+                self.drop(False)
+            elif event.type == pygame.QUIT:
+                self.save_data()
+                self.quit()
+            elif event.type == pygame.KEYDOWN:
+                for key in self.key_actions:
+                    if event.key == eval("pygame.K_"
+                                         + key):
+                        self.key_actions[key]()
+
     def train(self):
-        self.gameover = False
-        self.paused = False
-
-        key_actions = {
-            'LEFT': lambda: self.move(-1),
-            'RIGHT': lambda: self.move(+1),
-            'DOWN': lambda: self.insta_drop(),
-            'UP': self.rotate_stone,
-            'SPACE': self.start_game
-        }
-
-        dont_burn_my_cpu = pygame.time.Clock()
-
+        # Warning: running this function will overwrite the current data
         while 1:
             if self.number_of_games > 10000:
                 self.quit()
@@ -314,27 +337,12 @@ class TetrisApp(object):
                 # Make random choice
                 a = random.choice(self.ai.get_all_actions())
             else:
+                # Make best action locally
                 a = self.determine_best_local_action()
 
             current_state = self.ai.state
-
-            # Ready the action
-            for key in a:
-                pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key))
-            pygame.event.post(pygame.event.Event(pygame.KEYDOWN,
-                                                 key=pygame.K_DOWN))
-
-            for event in pygame.event.get():
-                if event.type == pygame.USEREVENT + 1:
-                    self.drop(False)
-                elif event.type == pygame.QUIT:
-                    self.save_data()
-                    self.quit()
-                elif event.type == pygame.KEYDOWN:
-                    for key in key_actions:
-                        if event.key == eval("pygame.K_"
-                                             + key):
-                            key_actions[key]()
+            self.convert_action_to_events(a)
+            self.handle_event()
 
             # Get the reward
             r = self.score - self.ai.score
@@ -349,22 +357,10 @@ class TetrisApp(object):
             self.ai.q_function_val[
                 (current_state, a)] = r + self.ai.discount_factor * max(
                 possible_next_q_values)
-            dont_burn_my_cpu.tick(30)
+            self.dont_burn_my_cpu.tick(30)
 
     def test(self):
         self.ai.import_q_function_data()
-        self.gameover = False
-        self.paused = False
-
-        key_actions = {
-            'LEFT': lambda: self.move(-1),
-            'RIGHT': lambda: self.move(+1),
-            'DOWN': lambda: self.insta_drop(),
-            'UP': self.rotate_stone,
-            'SPACE': self.start_game
-        }
-
-        dont_burn_my_cpu = pygame.time.Clock()
 
         while 1:
             if self.number_of_games > 100:
@@ -376,41 +372,12 @@ class TetrisApp(object):
                 self.draw_screen()
 
             a = self.determine_best_local_action()
+            self.convert_action_to_events(a)
+            self.handle_event()
 
-            for key in a:
-                pygame.event.post(
-                    pygame.event.Event(pygame.KEYDOWN, key=key))
-
-            pygame.event.post(pygame.event.Event(pygame.KEYDOWN,
-                                                 key=pygame.K_DOWN))
-
-            for event in pygame.event.get():
-                if event.type == pygame.USEREVENT + 1:
-                    self.drop(False)
-                elif event.type == pygame.QUIT:
-                    self.quit()
-                elif event.type == pygame.KEYDOWN:
-                    for key in key_actions:
-                        if event.key == eval("pygame.K_"
-                                             + key):
-                            key_actions[key]()
-
-            dont_burn_my_cpu.tick(30)
+            self.dont_burn_my_cpu.tick(30)
 
     def random_test(self):
-        self.gameover = False
-        self.paused = False
-
-        key_actions = {
-            'LEFT': lambda: self.move(-1),
-            'RIGHT': lambda: self.move(+1),
-            'DOWN': lambda: self.insta_drop(),
-            'UP': self.rotate_stone,
-            'SPACE': self.start_game
-        }
-
-        dont_burn_my_cpu = pygame.time.Clock()
-
         while 1:
             if self.number_of_games > 100:
                 self.quit()
@@ -421,31 +388,19 @@ class TetrisApp(object):
                 self.draw_screen()
 
             a = random.choice(self.ai.get_all_actions())
-            for key in a:
-                pygame.event.post(
-                    pygame.event.Event(pygame.KEYDOWN, key=key))
+            self.convert_action_to_events(a)
+            self.handle_event()
 
-            pygame.event.post(pygame.event.Event(pygame.KEYDOWN,
-                                                 key=pygame.K_DOWN))
-
-            for event in pygame.event.get():
-                if event.type == pygame.USEREVENT + 1:
-                    self.drop(False)
-                elif event.type == pygame.QUIT:
-                    self.quit()
-                elif event.type == pygame.KEYDOWN:
-                    for key in key_actions:
-                        if event.key == eval("pygame.K_"
-                                             + key):
-                            key_actions[key]()
-
-            dont_burn_my_cpu.tick(30)
+            self.dont_burn_my_cpu.tick(30)
 
 
 if __name__ == '__main__':
     AI = TetrisAI()
     App = TetrisApp(AI)
 
+    # Uncomment one of the lines below to use the AI
+    # Warning: training will overwrite the current data.
+
     # App.train()
-    # App.random_test()
-    App.test()
+    App.random_test()
+    # App.test()
